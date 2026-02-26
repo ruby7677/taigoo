@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>台股賣出價損益表 - 手機友善暗黑版</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body { background-color: #111827; font-family: system-ui, -apple-system, sans-serif; }
+        table { border-collapse: collapse; }
+        th, td { padding: 14px 8px; text-align: right; border-bottom: 1px solid #374151; font-size: 15px; }
+        .up { color: #34d399; } .down { color: #f87171; }
+        .buy-row { background-color: #1e40af !important; }
+        .price-cell { text-align: left; font-weight: 600; }
+        input { font-size: 17px; }
+    </style>
+</head>
+<body class="text-zinc-100 p-4">
+    <div class="max-w-4xl mx-auto bg-zinc-900 rounded-3xl shadow-2xl p-6">
+        <h1 class="text-3xl font-bold text-center mb-8">台股賣出價損益表</h1>
+        <div class="text-center text-emerald-400 text-sm mb-6">固定 ±20 Tick　自動展開至漲跌停</div>
+        
+        <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4 mb-6">
+            <div>
+                <label class="block text-sm font-medium mb-1 text-zinc-400">買入價</label>
+                <input id="buyPrice" type="number" step="0.01" value="150" class="w-full bg-zinc-800 border border-zinc-700 rounded-2xl px-5 py-4 text-white">
+            </div>
+            <div>
+                <label class="block text-sm font-medium mb-1 text-zinc-400">昨日收盤價</label>
+                <input id="yestClose" type="number" step="0.01" value="150" class="w-full bg-zinc-800 border border-zinc-700 rounded-2xl px-5 py-4 text-white">
+            </div>
+            <div>
+                <label class="block text-sm font-medium mb-1 text-zinc-400">股數</label>
+                <input id="shares" type="number" min="1" value="1000" class="w-full bg-zinc-800 border border-zinc-700 rounded-2xl px-5 py-4 text-white">
+            </div>
+            <div>
+                <label class="block text-sm font-medium mb-1 text-zinc-400">手續費率 (%)</label>
+                <input id="commRate" type="number" step="0.0001" value="0.1425" class="w-full bg-zinc-800 border border-zinc-700 rounded-2xl px-5 py-4 text-white">
+            </div>
+            <div>
+                <label class="block text-sm font-medium mb-1 text-zinc-400">一般證交稅 (%)</label>
+                <input id="taxRate" type="number" step="0.0001" value="0.3" class="w-full bg-zinc-800 border border-zinc-700 rounded-2xl px-5 py-4 text-white">
+            </div>
+        </div>
+
+        <div class="flex flex-wrap gap-6 mb-8 text-base">
+            <label class="flex items-center gap-3 cursor-pointer">
+                <input type="checkbox" id="dayTrade" class="w-6 h-6 accent-emerald-500">
+                <span class="text-zinc-300">當沖模式（證交稅 0.15%）</span>
+            </label>
+            <label class="flex items-center gap-3 cursor-pointer">
+                <input type="checkbox" id="zeroLot" class="w-6 h-6 accent-emerald-500">
+                <span class="text-zinc-300">零股模式（最低手續費 1元）</span>
+            </label>
+        </div>
+
+        <button onclick="generateTable()" 
+                class="w-full bg-emerald-600 hover:bg-emerald-500 py-6 rounded-3xl text-2xl font-semibold transition">
+            生成賣出價損益表
+        </button>
+
+        <div id="result" class="mt-10 overflow-x-auto rounded-2xl"></div>
+
+        <div class="mt-8 text-xs text-zinc-500 space-y-1 px-2">
+            <p>計算說明：損益已含買賣雙邊手續費 + 證交稅，最低手續費自動處理</p>
+        </div>
+    </div>
+
+    <script>
+        function getTickSize(p) {
+            p = Math.abs(p);
+            if (p < 10) return 0.01;
+            if (p < 50) return 0.05;
+            if (p < 100) return 0.1;
+            if (p < 500) return 0.5;
+            if (p < 1000) return 1;
+            return 5;
+        }
+
+        function roundToTick(price, tick) {
+            return Math.round(price / tick) * tick;
+        }
+
+        function getRequiredTicks(start, target, isUp) {
+            let count = 0;
+            let cur = start;
+            while ((isUp ? cur < target : cur > target) && count < 200) {
+                let t = getTickSize(cur);
+                cur = parseFloat((cur + (isUp ? t : -t)).toFixed(2));
+                count++;
+            }
+            return count;
+        }
+
+        function formatMoney(num) {
+            return Math.round(Math.abs(num)).toLocaleString('zh-TW');
+        }
+
+        function generateTable() {
+            const buyPrice = parseFloat(document.getElementById('buyPrice').value) || 150;
+            const yestClose = parseFloat(document.getElementById('yestClose').value) || 150;
+            let shares = parseInt(document.getElementById('shares').value) || 1000;
+            if (shares < 1) shares = 1;
+            const commRate = parseFloat(document.getElementById('commRate').value) || 0.1425;
+            const baseTax = parseFloat(document.getElementById('taxRate').value) || 0.3;
+            const isDayTrade = document.getElementById('dayTrade').checked;
+            const isZeroLot = document.getElementById('zeroLot').checked;
+            const minFee = isZeroLot ? 1 : 20;
+            const taxRate = isDayTrade ? 0.15 : baseTax;
+
+            const limitUp = roundToTick(yestClose * 1.1, getTickSize(yestClose * 1.1));
+            const limitDown = roundToTick(yestClose * 0.9, getTickSize(yestClose * 0.9));
+
+            const requiredUp = getRequiredTicks(buyPrice, limitUp, true);
+            const requiredDown = getRequiredTicks(buyPrice, limitDown, false);
+            const range = Math.max(20, requiredUp, requiredDown);
+
+            let prices = [];
+            let current = buyPrice;
+            prices.push({price: current});
+
+            for (let i = 1; i <= range; i++) {
+                let t = getTickSize(current);
+                current = parseFloat((current + t).toFixed(2));
+                prices.push({price: current});
+            }
+            current = buyPrice;
+            for (let i = 1; i <= range; i++) {
+                let t = getTickSize(current);
+                current = parseFloat((current - t).toFixed(2));
+                prices.unshift({price: current});
+            }
+
+            prices.sort((a, b) => b.price - a.price);
+
+            let html = `
+                <table class="w-full text-base bg-zinc-900 rounded-3xl overflow-hidden">
+                    <thead>
+                        <tr class="bg-zinc-800 text-zinc-400">
+                            <th class="text-left pl-6">賣出價</th>
+                            <th>損益</th>
+                            <th>手續費</th>
+                            <th>證交稅</th>
+                        </tr>
+                    </thead>
+                    <tbody class="divide-y divide-zinc-700">`;
+
+            prices.forEach(item => {
+                const p = item.price;
+                const buyValue = buyPrice * shares;
+                const buyComm = Math.max(minFee, buyValue * commRate / 100);
+                const sellValue = p * shares;
+                const sellComm = Math.max(minFee, sellValue * commRate / 100);
+                const sellTax = sellValue * taxRate / 100;
+
+                const totalBuyCost = buyValue + buyComm;
+                const totalSellNet = sellValue - sellComm - sellTax;
+                const totalProfit = totalSellNet - totalBuyCost;
+                const totalComm = buyComm + sellComm;
+
+                const isBuyRow = Math.abs(p - buyPrice) < 0.01;
+                const isLimitUp = Math.abs(p - limitUp) < 0.01;
+                const isLimitDown = Math.abs(p - limitDown) < 0.01;
+
+                let priceHTML = p.toFixed(2);
+                if (isLimitUp) priceHTML += ' <span class="text-emerald-400 font-bold">▲漲停</span>';
+                if (isLimitDown) priceHTML += ' <span class="text-rose-400 font-bold">▼跌停</span>';
+
+                const profitClass = totalProfit >= 0 ? 'up' : 'down';
+                const profitSign = totalProfit >= 0 ? '+' : '';
+                const profitFormatted = profitSign + formatMoney(totalProfit);
+
+                html += `
+                    <tr class="${isBuyRow ? 'buy-row' : ''}">
+                        <td class="price-cell pl-6">${priceHTML}</td>
+                        <td class="${profitClass} font-semibold">${profitFormatted}</td>
+                        <td>${formatMoney(totalComm)}</td>
+                        <td>${formatMoney(sellTax)}</td>
+                    </tr>`;
+            });
+
+            html += `</tbody></table>`;
+
+            html += `
+                <div class="mt-6 flex gap-4 justify-center text-sm flex-wrap">
+                    <div class="px-6 py-3 bg-emerald-900/50 rounded-2xl text-emerald-400">漲停：${limitUp.toFixed(2)}</div>
+                    <div class="px-6 py-3 bg-rose-900/50 rounded-2xl text-rose-400">跌停：${limitDown.toFixed(2)}</div>
+                </div>`;
+
+            if (isZeroLot && isDayTrade) {
+                html += `<div class="mt-4 text-center text-amber-400 text-sm">⚠️ 零股目前無法當沖，此為模擬</div>`;
+            }
+
+            document.getElementById('result').innerHTML = html;
+        }
+
+        window.onload = generateTable;
+    </script>
+</body>
+</html>
